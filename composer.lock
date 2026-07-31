@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "fda208f2bdd5ee3aaf79afef07ff8653",
+    "content-hash": "bc81aefe0c2e3b4468230e1d536b11b2",
     "packages": [
         {
             "name": "clue/stream-filter",
@@ -551,16 +551,16 @@
         },
         {
             "name": "particle-academy/fancy-git",
-            "version": "v0.1.0",
+            "version": "v0.2.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/Particle-Academy/fancy-git-php.git",
-                "reference": "2fbf08578e50f442c6930c9679d43750287b336e"
+                "reference": "dffdd0302c6584aeac7e5e4d22df4c4096f3d715"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/Particle-Academy/fancy-git-php/zipball/2fbf08578e50f442c6930c9679d43750287b336e",
-                "reference": "2fbf08578e50f442c6930c9679d43750287b336e",
+                "url": "https://api.github.com/repos/Particle-Academy/fancy-git-php/zipball/dffdd0302c6584aeac7e5e4d22df4c4096f3d715",
+                "reference": "dffdd0302c6584aeac7e5e4d22df4c4096f3d715",
                 "shasum": ""
             },
             "require": {
@@ -594,7 +594,7 @@
                 "issues": "https://github.com/Particle-Academy/fancy-git-php/issues",
                 "source": "https://github.com/Particle-Academy/fancy-git-php"
             },
-            "time": "2026-07-17T20:31:39+00:00"
+            "time": "2026-07-31T19:03:57+00:00"
         },
         {
             "name": "php-http/cache-plugin",

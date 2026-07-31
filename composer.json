@@ -8,7 +8,7 @@
     ],
     "require": {
         "php": "^8.3",
-        "particle-academy/fancy-git": ">=0.1 <2.0",
+        "particle-academy/fancy-git": ">=0.2 <2.0",
         "knplabs/github-api": "^3.16",
         "guzzlehttp/guzzle": "^7.15.1",
         "http-interop/http-factory-guzzle": "^1.2"
