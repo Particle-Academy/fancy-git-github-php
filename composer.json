@@ -7,7 +7,7 @@
         { "type": "vcs", "url": "https://github.com/Particle-Academy/fancy-git-php" }
     ],
     "require": {
-        "php": "^8.3",
+        "php": "^8.4",
         "particle-academy/fancy-git": ">=0.2 <2.0",
         "knplabs/github-api": "^3.16",
         "guzzlehttp/guzzle": "^7.15.1",
