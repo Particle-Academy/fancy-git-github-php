@@ -100,6 +100,51 @@ final class HttpStackTest extends TestCase
         ], $repository);
     }
 
+    /**
+     * GitHub Enterprise, through the factory a consumer is told to use.
+     *
+     * `withToken()` called knplabs' `Client::setEnterpriseUrl()`, which is
+     * PRIVATE. From outside the class that lands in `Client::__call()`, which
+     * treats the name as an API accessor and throws — so every Enterprise base
+     * URL failed at construction, while the github.com default never reached
+     * that line and kept every other test green.
+     *
+     * Both spellings are accepted: a bare host, and the Octokit-style base URL
+     * (`…/api/v3`) the TypeScript twin takes.
+     *
+     * @return array<string,array{0:string}>
+     */
+    public static function enterpriseBaseUrls(): array
+    {
+        return [
+            'bare host' => ['https://ghe.example.com'],
+            'Octokit-style base URL' => ['https://ghe.example.com/api/v3'],
+            'trailing slash' => ['https://ghe.example.com/'],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('enterpriseBaseUrls')]
+    public function test_a_github_enterprise_base_url_reaches_that_host(string $baseUrl): void
+    {
+        RecordingHttpClient::respondWith([
+            'id' => 42,
+            'html_url' => 'https://ghe.example.com/acme/app',
+            'default_branch' => 'main',
+            'private' => true,
+        ]);
+
+        $provider = GitHubProvider::withToken('secret', $baseUrl);
+        $provider->repository(self::REF);
+
+        $request = RecordingHttpClient::only($this);
+        self::assertSame('https://ghe.example.com/api/v3/repos/acme/app', (string) $request->getUri());
+        self::assertSame('token secret', $request->getHeaderLine('Authorization'));
+        self::assertSame(
+            ['provider' => 'github', 'owner' => 'acme', 'name' => 'app', 'baseUrl' => rtrim($baseUrl, '/')],
+            $provider->identify(['name' => 'origin', 'fetchUrl' => 'git@ghe.example.com:acme/app.git']),
+        );
+    }
+
     public function test_a_write_sends_its_json_body_through_guzzle_psr7s_stream_factory(): void
     {
         RecordingHttpClient::respondWith([

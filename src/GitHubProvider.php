@@ -15,15 +15,23 @@ final class GitHubProvider implements GitProvider, IssueProvider
         private readonly string $baseUrl = 'https://api.github.com',
     ) {}
 
+    /**
+     * @param  string  $baseUrl  `https://api.github.com`, or a GitHub Enterprise
+     *                           host — bare (`https://ghe.example.com`) or as an
+     *                           Octokit-style base URL (`…/api/v3`). knplabs adds
+     *                           the `/api/v3` path itself and keeps only the host.
+     */
     public static function withToken(string $token, string $baseUrl = 'https://api.github.com'): self
     {
-        $client = new Client;
-        $client->authenticate($token, null, Client::AUTH_ACCESS_TOKEN);
-        if ($baseUrl !== 'https://api.github.com') {
-            $client->setEnterpriseUrl(rtrim($baseUrl, '/'));
-        }
+        $baseUrl = rtrim($baseUrl, '/');
 
-        return new self($client, rtrim($baseUrl, '/'));
+        // The Enterprise URL goes in through the constructor. knplabs'
+        // setEnterpriseUrl() is private, and calling it from here fell into
+        // Client::__call(), which threw for every Enterprise host.
+        $client = new Client(null, null, $baseUrl === 'https://api.github.com' ? null : $baseUrl);
+        $client->authenticate($token, null, Client::AUTH_ACCESS_TOKEN);
+
+        return new self($client, $baseUrl);
     }
 
     public function kind(): string

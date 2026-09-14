@@ -10,6 +10,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`GitHubProvider::withToken($token, $baseUrl)` threw for every GitHub
+  Enterprise URL.** It called knplabs' `Client::setEnterpriseUrl()`, which is
+  private; from outside the class that fell into `Client::__call()` and threw
+  `BadMethodCallException: Undefined method called: "setEnterpriseUrl"` before a
+  provider existed. The github.com default never reached that line, which is why
+  nothing else noticed. The URL is now passed through the client's constructor.
+
+  A bare host (`https://ghe.example.com`), the Octokit-style base URL the
+  TypeScript twin takes (`https://ghe.example.com/api/v3`) and a trailing slash
+  all reach `https://ghe.example.com/api/v3/...`.
+
+  **What you must do:** nothing, unless you worked around it by building a
+  `Github\Client` yourself and passing it to `new GitHubProvider(...)` — that
+  still works, and `withToken()` is now the shorter way to the same client.
+
 ### Removed
 
 - **`http-interop/http-factory-guzzle` is no longer required.** It was a PSR-17
