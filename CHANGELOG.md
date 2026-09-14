@@ -10,6 +10,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **`http-interop/http-factory-guzzle` is no longer required.** It was a PSR-17
+  factory bridge, and its upstream has had no release or commit since
+  2025-12-15, which fails the suite's rule that third-party code must be
+  actively maintained.
+
+  It was also never used. knplabs/github-api finds its request, stream and URI
+  factories through php-http/discovery, and discovery prefers
+  `GuzzleHttp\Psr7\HttpFactory` — shipped by guzzlehttp/psr7 2.x, which
+  guzzlehttp/guzzle already installs — over the bridge's classes. Requests were
+  built by that class before this release and are built by the same class after
+  it, on the same PSR-7 implementation. `tests/HttpStackTest.php` pins it: an
+  authenticated read, a JSON write, and a control asserting the bridge is
+  absent, so a green run says which configuration it proved.
+
+  **What you must do:** nothing. The one exception: if your own code uses the
+  `Http\Factory\Guzzle\*` classes directly, it was receiving them through this
+  package by accident. Either require `http-interop/http-factory-guzzle`
+  yourself, or switch to `GuzzleHttp\Psr7\HttpFactory`, which implements all six
+  PSR-17 interfaces.
+
 ## [0.3.0] — 2026-08-07
 
 ### Changed
