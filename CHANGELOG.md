@@ -26,6 +26,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI: re-pin org third-party allowlist to 2614224
 - Tests moved to Pest (`^5.0`); `phpunit/phpunit` removed from require-dev (Pest brings it transitively). No runtime change.
 
+### Fixed
+
+- **`listReviews()` and `listIssues()` paginate.** They returned one page with
+  no `nextCursor` and ignored `cursor`, so a walk stopped after the first page.
+  They now send `page`, and take the next cursor from GitHub's `Link` header
+  (`rel="next"`), falling back to the page length only when there is no Link
+  header, exactly as the TypeScript twin does. `listReviews()` also maps
+  `state` as the twin does (`merged`/`closed` to closed, `open`/`draft` to
+  open, otherwise all), and `listIssues()` passes `state` through.
+- **A pagination `Link` header over 8 KB throws** a `GitException` (`unknown`)
+  rather than being parsed or ignored, so a hostile server cannot stall the
+  parse or end a walk with a list that reads as complete.
+- **GitHub's failures are `GitException`s with the fancy-git code.** They were
+  knplabs exceptions with no code: 401/403 now `auth`, 404 `not_found`,
+  400/422 `invalid_argument`, 405 `unsupported`, 409 `conflict`, any rate
+  limit `rate_limited`, otherwise `unknown`, with the HTTP status as the
+  exception code. **If you caught `Github\Exception\RuntimeException` (or its
+  subclasses) from this adapter, catch `FancyGit\Error\GitException` instead.**
+- **A GET (any idempotent method) that answers 5xx, or fails on the network,
+  is retried** up to 3 times with backoff; a short rate limit (Retry-After up
+  to 60 s) is waited out once. A POST is never replayed. Same policy as the
+  TypeScript twin. All of this is the new `GitHubTransport` plugin, which the
+  provider installs on the knplabs client it is given.
+- **`checks()` works.** It called `api('check')`, which knplabs does not have
+  ("Undefined api instance called: check"), so it threw on every call. It now
+  reads the check runs and the combined commit statuses and returns both.
+- **`repository()` keeps the ref's `baseUrl`**, as the TypeScript twin does.
+- **`createReview()` without a body is sent.** knplabs refused a pull request
+  with neither `body` nor `issue` before sending it; GitHub accepts one, and the
+  TypeScript twin sends it. Only the keys given are sent now (`body` and
+  `draft` are omitted when absent).
+
+Found by the fancy-labs git-adapter test.
+
 ## [0.3.1] — 2026-09-13
 
 ### Fixed

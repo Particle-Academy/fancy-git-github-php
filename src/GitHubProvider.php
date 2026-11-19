@@ -7,13 +7,30 @@ namespace FancyGit\GitHub;
 use FancyGit\Provider\GitProvider;
 use FancyGit\Provider\IssueProvider;
 use Github\Client;
+use Github\HttpClient\Message\ResponseMediator;
 
 final class GitHubProvider implements GitProvider, IssueProvider
 {
+    /**
+     * @param  GitHubTransport|null  $transport  the adapter's request rules
+     *                                           (error codes, retries, the Link
+     *                                           cap); installed innermost on the
+     *                                           client's plugin stack, replacing
+     *                                           any earlier one
+     */
     public function __construct(
         private readonly Client $client,
         private readonly string $baseUrl = 'https://api.github.com',
-    ) {}
+        ?GitHubTransport $transport = null,
+    ) {
+        // knplabs keeps its plugin builder private, so it is read in knplabs'
+        // own class scope. A test double of Client has none, and is left alone.
+        $builder = \Closure::bind(static fn (Client $c): mixed => $c->httpClientBuilder, null, Client::class)($client);
+        if ($builder instanceof \Github\HttpClient\Builder) {
+            $builder->removePlugin(GitHubTransport::class);
+            $builder->addPlugin($transport ?? new GitHubTransport);
+        }
+    }
 
     /**
      * @param  string  $baseUrl  `https://api.github.com`, or a GitHub Enterprise
@@ -70,15 +87,21 @@ final class GitHubProvider implements GitProvider, IssueProvider
             'defaultBranch' => $data['default_branch'],
             'private' => $data['private'],
             'description' => $data['description'] ?? null,
-        ];
+        ] + (($ref['baseUrl'] ?? '') !== '' ? ['baseUrl' => $ref['baseUrl']] : []);
     }
 
     public function listReviews(array $ref, array $query = []): array
     {
-        $state = in_array($query['state'] ?? null, ['open', 'closed'], true) ? $query['state'] : 'all';
-        $items = $this->client->api('pull_request')->all($ref['owner'], $ref['name'], ['state' => $state, 'per_page' => $query['limit'] ?? 30]);
+        $state = match ($query['state'] ?? null) {
+            'merged', 'closed' => 'closed',
+            'open', 'draft' => 'open',
+            default => 'all',
+        };
+        $page = (int) ($query['cursor'] ?? 1);
+        $perPage = (int) ($query['limit'] ?? 30);
+        $items = $this->client->api('pull_request')->all($ref['owner'], $ref['name'], ['state' => $state, 'page' => $page, 'per_page' => $perPage]);
 
-        return ['items' => array_map($this->mapReview(...), $items)];
+        return ['items' => array_map($this->mapReview(...), $items)] + $this->nextCursor(count($items), $page, $perPage);
     }
 
     public function getReview(array $ref, int $number): array
@@ -95,15 +118,27 @@ final class GitHubProvider implements GitProvider, IssueProvider
 
     public function createReview(array $ref, array $input): array
     {
-        $data = $this->client->api('pull_request')->create($ref['owner'], $ref['name'], [
-            'title' => $input['title'],
-            'body' => $input['body'] ?? null,
-            'head' => $input['sourceBranch'],
-            'base' => $input['targetBranch'],
-            'draft' => $input['draft'] ?? false,
-        ]);
+        // Sent directly: knplabs' PullRequest::create() refuses a pull request
+        // with neither `body` nor `issue` before sending it, but GitHub accepts
+        // one with only a title, and the TypeScript twin sends it. Only the
+        // keys given are sent, as there.
+        $params = ['title' => $input['title']];
+        if (isset($input['body'])) {
+            $params['body'] = $input['body'];
+        }
+        $params['head'] = $input['sourceBranch'];
+        $params['base'] = $input['targetBranch'];
+        if (isset($input['draft'])) {
+            $params['draft'] = (bool) $input['draft'];
+        }
 
-        return $this->mapReview($data);
+        $response = $this->client->getHttpClient()->post(
+            '/repos/'.rawurlencode($ref['owner']).'/'.rawurlencode($ref['name']).'/pulls',
+            ['Content-Type' => 'application/json'],
+            json_encode($params, JSON_THROW_ON_ERROR),
+        );
+
+        return $this->mapReview(ResponseMediator::getContent($response));
     }
 
     public function compare(array $ref, string $base, string $head): array
@@ -128,16 +163,28 @@ final class GitHubProvider implements GitProvider, IssueProvider
 
     public function checks(array $ref, string $revision): array
     {
-        $runs = $this->client->api('check')->runs()->allForReference($ref['owner'], $ref['name'], $revision);
+        // A commit carries both check runs and commit statuses; a summary that
+        // dropped either would report a red commit as green.
+        $repo = $this->client->api('repo');
+        $runs = $repo->checkRuns()->allForReference($ref['owner'], $ref['name'], $revision);
+        $statuses = $repo->statuses()->combined($ref['owner'], $ref['name'], $revision);
 
-        return array_map(static fn (array $run): array => [
-            'id' => (string) $run['id'],
-            'name' => $run['name'],
-            'state' => self::checkState($run['status'] ?? null, $run['conclusion'] ?? null),
-            'webUrl' => $run['html_url'] ?? null,
-            'startedAt' => $run['started_at'] ?? null,
-            'completedAt' => $run['completed_at'] ?? null,
-        ], $runs['check_runs'] ?? []);
+        return [
+            ...array_map(static fn (array $run): array => array_filter([
+                'id' => (string) $run['id'],
+                'name' => $run['name'],
+                'state' => self::checkState($run['status'] ?? null, $run['conclusion'] ?? null),
+                'webUrl' => $run['html_url'] ?? null,
+                'startedAt' => $run['started_at'] ?? null,
+                'completedAt' => $run['completed_at'] ?? null,
+            ], static fn ($v) => $v !== null), $runs['check_runs'] ?? []),
+            ...array_map(static fn (array $status): array => array_filter([
+                'id' => (string) $status['id'],
+                'name' => $status['context'],
+                'state' => self::checkState($status['state'] ?? null, $status['state'] ?? null),
+                'webUrl' => $status['target_url'] ?? null,
+            ], static fn ($v) => $v !== null), $statuses['statuses'] ?? []),
+        ];
     }
 
     /**
@@ -150,9 +197,12 @@ final class GitHubProvider implements GitProvider, IssueProvider
      */
     public function listIssues(array $ref, array $query = []): array
     {
+        $page = (int) ($query['cursor'] ?? 1);
+        $perPage = (int) ($query['limit'] ?? 30);
         $params = [
-            'state' => in_array($query['state'] ?? null, ['open', 'closed'], true) ? $query['state'] : 'open',
-            'per_page' => $query['limit'] ?? 30,
+            'state' => $query['state'] ?? 'open',
+            'page' => $page,
+            'per_page' => $perPage,
         ];
         if (! empty($query['labels'])) {
             $params['labels'] = implode(',', $query['labels']);
@@ -164,7 +214,33 @@ final class GitHubProvider implements GitProvider, IssueProvider
         $items = $this->client->api('issue')->all($ref['owner'], $ref['name'], $params);
         $issues = array_values(array_filter($items, fn ($item) => ! isset($item['pull_request'])));
 
-        return ['items' => array_map($this->mapIssue(...), $issues)];
+        // Paginate on what GitHub returned, not on what survived the filter: a
+        // page that was all pull requests still has a next page behind it.
+        return ['items' => array_map($this->mapIssue(...), $issues)] + $this->nextCursor(count($items), $page, $perPage);
+    }
+
+    /**
+     * The next cursor of a page-numbered list. GitHub's `Link` header is the
+     * authority when present: no `rel="next"` means there is no next page, even
+     * when this page came back full. Only without a Link header at all does the
+     * page length decide.
+     *
+     * @return array{nextCursor?: string}
+     */
+    private function nextCursor(int $count, int $page, int $perPage): array
+    {
+        $response = $this->client->getLastResponse();
+        if ($response !== null && $response->hasHeader('Link')) {
+            $next = GitHubTransport::nextLink($response->getHeaderLine('Link'));
+            if ($next === null) {
+                return [];
+            }
+            parse_str((string) parse_url($next, PHP_URL_QUERY), $q);
+
+            return ['nextCursor' => is_string($q['page'] ?? null) && $q['page'] !== '' ? $q['page'] : (string) ($page + 1)];
+        }
+
+        return $count === $perPage ? ['nextCursor' => (string) ($page + 1)] : [];
     }
 
     public function getIssue(array $ref, int $number): array
