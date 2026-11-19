@@ -9,7 +9,7 @@ works in this repo.
 
 - `src/GitHubProvider.php` — the whole adapter (namespace `FancyGit\GitHub`),
   over `knplabs/github-api`.
-- `tests/` — the PHPUnit suite. `HttpStackTest.php` pins the HTTP stack that
+- `tests/` — the Pest suite. `HttpStackTest.php` pins the HTTP stack that
   knplabs finds through `php-http/discovery` at runtime: what the adapter sends
   is decided by what is installed, not by this package's code, so those tests
   replace only the PSR-18 client and leave the factories to discovery.
@@ -18,7 +18,7 @@ works in this repo.
 
 ```bash
 composer install
-composer test   # phpunit
+composer test   # pest
 ```
 
 ## Changelog

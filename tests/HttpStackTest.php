@@ -31,74 +31,12 @@ use Psr\Http\Message\ResponseInterface;
  * factories are left to discovery exactly as production leaves them — they are
  * the thing under test.
  */
-final class HttpStackTest extends TestCase
+abstract class HttpStackCase extends TestCase
 {
-    private const REF = ['provider' => 'github', 'owner' => 'acme', 'name' => 'app'];
+    protected const REF = ['provider' => 'github', 'owner' => 'acme', 'name' => 'app'];
 
     /** @var array<int,string> */
-    private array $strategies = [];
-
-    protected function setUp(): void
-    {
-        $this->strategies = [...ClassDiscovery::getStrategies()];
-        RecordingHttpClient::reset();
-        Psr18ClientDiscovery::prependStrategy(RecordingClientStrategy::class);
-    }
-
-    protected function tearDown(): void
-    {
-        ClassDiscovery::setStrategies($this->strategies);
-    }
-
-    public function test_every_psr17_factory_the_client_discovers_is_guzzle_psr7s_own(): void
-    {
-        // knplabs' Builder asks for a request and a stream factory; its Client
-        // asks for a URI factory. All three must resolve without any bridge.
-        self::assertInstanceOf(HttpFactory::class, Psr17FactoryDiscovery::findRequestFactory());
-        self::assertInstanceOf(HttpFactory::class, Psr17FactoryDiscovery::findStreamFactory());
-        self::assertInstanceOf(HttpFactory::class, Psr17FactoryDiscovery::findUriFactory());
-    }
-
-    public function test_the_psr17_bridge_is_not_installed(): void
-    {
-        // The control for the rest of this file. Every other test here passes
-        // whether or not http-interop/http-factory-guzzle is installed, because
-        // discovery prefers guzzlehttp/psr7's HttpFactory over it — so without
-        // this, a green run could not say which configuration it proved.
-        self::assertFalse(
-            class_exists('Http\Factory\Guzzle\RequestFactory'),
-            'http-interop/http-factory-guzzle is installed again; the adapter does not need it.',
-        );
-    }
-
-    public function test_a_read_goes_out_authenticated_to_api_github_com(): void
-    {
-        RecordingHttpClient::respondWith([
-            'id' => 42,
-            'html_url' => 'https://github.com/acme/app',
-            'default_branch' => 'main',
-            'private' => false,
-            'description' => 'An app',
-        ]);
-
-        $repository = GitHubProvider::withToken('secret')->repository(self::REF);
-
-        $request = RecordingHttpClient::only($this);
-        self::assertInstanceOf(Request::class, $request);
-        self::assertSame('GET', $request->getMethod());
-        self::assertSame('https://api.github.com/repos/acme/app', (string) $request->getUri());
-        self::assertSame('token secret', $request->getHeaderLine('Authorization'));
-        self::assertSame([
-            'provider' => 'github',
-            'owner' => 'acme',
-            'name' => 'app',
-            'id' => '42',
-            'webUrl' => 'https://github.com/acme/app',
-            'defaultBranch' => 'main',
-            'private' => false,
-            'description' => 'An app',
-        ], $repository);
-    }
+    protected array $strategies = [];
 
     /**
      * GitHub Enterprise, through the factory a consumer is told to use.
@@ -122,53 +60,109 @@ final class HttpStackTest extends TestCase
             'trailing slash' => ['https://ghe.example.com/'],
         ];
     }
-
-    #[\PHPUnit\Framework\Attributes\DataProvider('enterpriseBaseUrls')]
-    public function test_a_github_enterprise_base_url_reaches_that_host(string $baseUrl): void
-    {
-        RecordingHttpClient::respondWith([
-            'id' => 42,
-            'html_url' => 'https://ghe.example.com/acme/app',
-            'default_branch' => 'main',
-            'private' => true,
-        ]);
-
-        $provider = GitHubProvider::withToken('secret', $baseUrl);
-        $provider->repository(self::REF);
-
-        $request = RecordingHttpClient::only($this);
-        self::assertSame('https://ghe.example.com/api/v3/repos/acme/app', (string) $request->getUri());
-        self::assertSame('token secret', $request->getHeaderLine('Authorization'));
-        self::assertSame(
-            ['provider' => 'github', 'owner' => 'acme', 'name' => 'app', 'baseUrl' => rtrim($baseUrl, '/')],
-            $provider->identify(['name' => 'origin', 'fetchUrl' => 'git@ghe.example.com:acme/app.git']),
-        );
-    }
-
-    public function test_a_write_sends_its_json_body_through_guzzle_psr7s_stream_factory(): void
-    {
-        RecordingHttpClient::respondWith([
-            'id' => 100,
-            'number' => 7,
-            'title' => 'Broken',
-            'state' => 'open',
-            'html_url' => 'https://github.com/acme/app/issues/7',
-            'user' => ['login' => 'ada'],
-            'labels' => [['name' => 'bug']],
-            'assignees' => [],
-        ], 201);
-
-        $issue = GitHubProvider::withToken('secret')->createIssue(self::REF, ['title' => 'Broken', 'labels' => ['bug']]);
-
-        $request = RecordingHttpClient::only($this);
-        self::assertSame('POST', $request->getMethod());
-        self::assertSame('https://api.github.com/repos/acme/app/issues', (string) $request->getUri());
-        self::assertInstanceOf(Stream::class, $request->getBody());
-        self::assertSame(['title' => 'Broken', 'labels' => ['bug']], json_decode((string) $request->getBody(), true));
-        self::assertSame(7, $issue['number']);
-        self::assertSame(['bug'], $issue['labels']);
-    }
 }
+
+uses(HttpStackCase::class);
+
+beforeEach(function () {
+    $this->strategies = [...ClassDiscovery::getStrategies()];
+    RecordingHttpClient::reset();
+    Psr18ClientDiscovery::prependStrategy(RecordingClientStrategy::class);
+});
+
+afterEach(function () {
+    ClassDiscovery::setStrategies($this->strategies);
+});
+
+test('every psr17 factory the client discovers is guzzle psr7s own', function () {
+    // knplabs' Builder asks for a request and a stream factory; its Client
+    // asks for a URI factory. All three must resolve without any bridge.
+    self::assertInstanceOf(HttpFactory::class, Psr17FactoryDiscovery::findRequestFactory());
+    self::assertInstanceOf(HttpFactory::class, Psr17FactoryDiscovery::findStreamFactory());
+    self::assertInstanceOf(HttpFactory::class, Psr17FactoryDiscovery::findUriFactory());
+});
+
+test('the psr17 bridge is not installed', function () {
+    // The control for the rest of this file. Every other test here passes
+    // whether or not http-interop/http-factory-guzzle is installed, because
+    // discovery prefers guzzlehttp/psr7's HttpFactory over it — so without
+    // this, a green run could not say which configuration it proved.
+    self::assertFalse(
+        class_exists('Http\Factory\Guzzle\RequestFactory'),
+        'http-interop/http-factory-guzzle is installed again; the adapter does not need it.',
+    );
+});
+
+test('a read goes out authenticated to api github com', function () {
+    RecordingHttpClient::respondWith([
+        'id' => 42,
+        'html_url' => 'https://github.com/acme/app',
+        'default_branch' => 'main',
+        'private' => false,
+        'description' => 'An app',
+    ]);
+
+    $repository = GitHubProvider::withToken('secret')->repository(self::REF);
+
+    $request = RecordingHttpClient::only($this);
+    self::assertInstanceOf(Request::class, $request);
+    self::assertSame('GET', $request->getMethod());
+    self::assertSame('https://api.github.com/repos/acme/app', (string) $request->getUri());
+    self::assertSame('token secret', $request->getHeaderLine('Authorization'));
+    self::assertSame([
+        'provider' => 'github',
+        'owner' => 'acme',
+        'name' => 'app',
+        'id' => '42',
+        'webUrl' => 'https://github.com/acme/app',
+        'defaultBranch' => 'main',
+        'private' => false,
+        'description' => 'An app',
+    ], $repository);
+});
+
+test('a github enterprise base url reaches that host', function (string $baseUrl) {
+    RecordingHttpClient::respondWith([
+        'id' => 42,
+        'html_url' => 'https://ghe.example.com/acme/app',
+        'default_branch' => 'main',
+        'private' => true,
+    ]);
+
+    $provider = GitHubProvider::withToken('secret', $baseUrl);
+    $provider->repository(self::REF);
+
+    $request = RecordingHttpClient::only($this);
+    self::assertSame('https://ghe.example.com/api/v3/repos/acme/app', (string) $request->getUri());
+    self::assertSame('token secret', $request->getHeaderLine('Authorization'));
+    self::assertSame(
+        ['provider' => 'github', 'owner' => 'acme', 'name' => 'app', 'baseUrl' => rtrim($baseUrl, '/')],
+        $provider->identify(['name' => 'origin', 'fetchUrl' => 'git@ghe.example.com:acme/app.git']),
+    );
+})->with(HttpStackCase::enterpriseBaseUrls());
+
+test('a write sends its json body through guzzle psr7s stream factory', function () {
+    RecordingHttpClient::respondWith([
+        'id' => 100,
+        'number' => 7,
+        'title' => 'Broken',
+        'state' => 'open',
+        'html_url' => 'https://github.com/acme/app/issues/7',
+        'user' => ['login' => 'ada'],
+        'labels' => [['name' => 'bug']],
+        'assignees' => [],
+    ], 201);
+
+    $issue = GitHubProvider::withToken('secret')->createIssue(self::REF, ['title' => 'Broken', 'labels' => ['bug']]);
+
+    $request = RecordingHttpClient::only($this);
+    self::assertSame('POST', $request->getMethod());
+    self::assertSame('https://api.github.com/repos/acme/app/issues', (string) $request->getUri());
+    self::assertInstanceOf(Stream::class, $request->getBody());
+    self::assertSame(['title' => 'Broken', 'labels' => ['bug']], json_decode((string) $request->getBody(), true));
+    self::assertSame(7, $issue['number']);
+    self::assertSame(['bug'], $issue['labels']);
+});
 
 /**
  * A PSR-18 client that records what it is sent and answers from a script.
